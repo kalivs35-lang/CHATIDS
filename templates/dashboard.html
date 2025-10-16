@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1>Security Alert Dashboard</h1>
+        <p class="text-muted">AI-powered explanations of network security alerts</p>
+    </div>
+</div>
+
+<!-- Service Status -->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-activity"></i> Service Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-{% if status.suricata %}success{% else %}danger{% endif %} me-2">
+                                {% if status.suricata %}Running{% else %}Stopped{% endif %}
+                            </span>
+                            <strong>Suricata IDS</strong>
+                        </div>
+                        <div class="mt-2">
+                            {% if status.suricata %}
+                            <button class="btn btn-warning btn-sm" onclick="stopSuricata()">
+                                <i class="bi bi-stop-circle"></i> Stop
+                            </button>
+                            {% else %}
+                            <button class="btn btn-success btn-sm" onclick="startSuricata()">
+                                <i class="bi bi-play-circle"></i> Start
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-{% if status.watcher %}success{% else %}danger{% endif %} me-2">
+                                {% if status.watcher %}Running{% else %}Stopped{% endif %}
+                            </span>
+                            <strong>ChatIDS Watcher</strong>
+                        </div>
+                        <div class="mt-2">
+                            {% if status.watcher %}
+                            <button class="btn btn-warning btn-sm" onclick="stopWatcher()">
+                                <i class="bi bi-stop-circle"></i> Stop
+                            </button>
+                            {% else %}
+                            <button class="btn btn-success btn-sm" onclick="startWatcher()">
+                                <i class="bi bi-play-circle"></i> Start
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-success me-2">Running</span>
+                            <strong>Web Dashboard</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ stats.total_alerts }}</h4>
+                        <p>Total Alerts</p>
+                    </div>
+                    <i class="bi bi-exclamation-triangle fa-2x"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ stats.alerts_24h }}</h4>
+                        <p>Last 24 Hours</p>
+                    </div>
+                    <i class="bi bi-clock fa-2x"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ stats.severity_breakdown.get(1, 0) }}</h4>
+                        <p>High Severity</p>
+                    </div>
+                    <i class="bi bi-exclamation-circle fa-2x"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h4>{{ stats.severity_breakdown.get(3, 0) }}</h4>
+                        <p>Low Severity</p>
+                    </div>
+                    <i class="bi bi-info-circle fa-2x"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="row mb-3">
+    <div class="col">
+        <form method="GET" class="d-flex gap-3 align-items-end">
+            <div>
+                <label class="form-label">Severity Filter</label>
+                <select name="severity" class="form-select">
+                    <option value="">All Severities</option>
+                    <option value="1" {% if current_severity == 1 %}selected{% endif %}>High (1)</option>
+                    <option value="2" {% if current_severity == 2 %}selected{% endif %}>Medium (2)</option>
+                    <option value="3" {% if current_severity == 3 %}selected{% endif %}>Low (3)</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Time Filter</label>
+                <select name="hours" class="form-select">
+                    <option value="">All Time</option>
+                    <option value="1" {% if current_hours == 1 %}selected{% endif %}>Last Hour</option>
+                    <option value="6" {% if current_hours == 6 %}selected{% endif %}>Last 6 Hours</option>
+                    <option value="24" {% if current_hours == 24 %}selected{% endif %}>Last 24 Hours</option>
+                    <option value="168" {% if current_hours == 168 %}selected{% endif %}>Last Week</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="btn btn-primary">Filter</button>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Alerts List -->
+<div class="row">
+    <div class="col">
+        <h3>Recent Alerts</h3>
+        {% if alerts %}
+            <div class="row">
+                {% for alert in alerts %}
+                <div class="col-12 mb-3">
+                    <div class="card alert-card severity-{{ alert.severity }}">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <h5 class="card-title">
+                                        <i class="bi bi-exclamation-triangle text-warning"></i>
+                                        {{ alert.alert_signature }}
+                                    </h5>
+                                    <p class="text-muted mb-2">
+                                        <small>
+                                            <i class="bi bi-clock"></i> {{ alert.timestamp }}
+                                            <span class="ms-3">
+                                                <i class="bi bi-hdd-network"></i> 
+                                                {{ alert.src_ip }}:{{ alert.src_port }} → {{ alert.dest_ip }}:{{ alert.dest_port }}
+                                            </span>
+                                            <span class="ms-3">
+                                                <i class="bi bi-tag"></i> {{ alert.alert_category }}
+                                            </span>
+                                        </small>
+                                    </p>
+                                    {% if alert.explanation %}
+                                    <div class="explanation-box">
+                                        <strong>AI Explanation:</strong>
+                                        <div class="mt-2">{{ alert.explanation[:200] }}{% if alert.explanation|length > 200 %}...{% endif %}</div>
+                                    </div>
+                                    {% else %}
+                                    <div class="text-muted">
+                                        <em>No explanation available</em>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <span class="badge bg-{% if alert.severity == 1 %}danger{% elif alert.severity == 2 %}warning{% else %}secondary{% endif %} mb-2">
+                                        Severity {{ alert.severity }}
+                                    </span><br>
+                                    <a href="{{ url_for('alert_detail', alert_id=alert.id) }}" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-eye"></i> View Details
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                No alerts found matching your criteria.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function startSuricata() {
+    fetch('/api/start_suricata')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to start Suricata: ' + data.message);
+            }
+        });
+}
+
+function stopSuricata() {
+    fetch('/api/stop_suricata')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to stop Suricata: ' + data.message);
+            }
+        });
+}
+
+function startWatcher() {
+    fetch('/api/start_watcher')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to start watcher: ' + data.message);
+            }
+        });
+}
+
+function stopWatcher() {
+    fetch('/api/stop_watcher')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to stop watcher: ' + data.message);
+            }
+        });
+}
+</script>
+{% endblock %}

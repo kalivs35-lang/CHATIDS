@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Alert Details - ChatIDS{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Alert #{{ alert.id }}</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card severity-{{ alert.severity }}">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h3 class="mb-0">
+                        <i class="bi bi-exclamation-triangle text-warning"></i>
+                        {{ alert.alert_signature }}
+                    </h3>
+                    <span class="badge bg-{% if alert.severity == 1 %}danger{% elif alert.severity == 2 %}warning{% else %}secondary{% endif %}">
+                        Severity {{ alert.severity }}
+                    </span>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Basic Info -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h5>Alert Information</h5>
+                        <table class="table table-sm">
+                            <tr><td><strong>Timestamp:</strong></td><td>{{ alert.timestamp }}</td></tr>
+                            <tr><td><strong>Category:</strong></td><td>{{ alert.alert_category }}</td></tr>
+                            <tr><td><strong>Protocol:</strong></td><td>{{ alert.protocol }}</td></tr>
+                            <tr><td><strong>Source:</strong></td><td>{{ alert.src_ip }}:{{ alert.src_port }}</td></tr>
+                            <tr><td><strong>Destination:</strong></td><td>{{ alert.dest_ip }}:{{ alert.dest_port }}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h5>Status</h5>
+                        <div class="alert alert-info">
+                            <i class="bi bi-robot"></i>
+                            {% if alert.explanation_cached %}
+                            This explanation was generated using AI and cached for efficiency.
+                            {% else %}
+                            This alert has not been processed through AI explanation yet.
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- AI Explanation -->
+                {% if alert.explanation %}
+                <div class="row mb-4">
+                    <div class="col">
+                        <h5>AI-Generated Explanation</h5>
+                        <div class="explanation-box">
+                            <pre style="white-space: pre-wrap; font-family: inherit;">{{ alert.explanation }}</pre>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- Raw Alert Data -->
+                {% if alert.raw_alert_parsed %}
+                <div class="row">
+                    <div class="col">
+                        <h5>Technical Details</h5>
+                        <div class="accordion" id="technicalDetails">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="rawDataHeader">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawDataCollapse">
+                                        <i class="bi bi-code-slash me-2"></i> Raw Alert Data
+                                    </button>
+                                </h2>
+                                <div id="rawDataCollapse" class="accordion-collapse collapse" data-bs-parent="#technicalDetails">
+                                    <div class="accordion-body">
+                                        <pre><code>{{ alert.raw_alert_parsed | tojsonpretty }}</code></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

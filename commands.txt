@@ -1,0 +1,25 @@
+Complete Setup Commands:
+Run these in separate terminals:
+
+Terminal 1 (Suricata):
+
+bash
+sudo suricata -c /etc/suricata/suricata.yaml -i eth0
+Terminal 2 (Watcher):
+
+bash
+cd ~/projects/chatids && python watcher.py
+Terminal 3 (Web Dashboard):
+
+bash
+cd ~/projects/chatids && python webapp.py --port 8080
+Terminal 4 (Generate Traffic):
+
+bash
+# Wait a moment, then run:
+ping -c 3 8.8.8.8
+curl http://testmyids.com
+
+
+sudo lsof -i :5001
+└─$ sudo kill -9 <pid>
