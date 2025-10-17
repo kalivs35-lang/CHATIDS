@@ -407,6 +407,127 @@ def api_db_optimize():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/chat/ask', methods=['POST'])
+def api_chat_ask():
+    """Handle chat questions about alerts"""
+    try:
+        data = request.get_json()
+        alert_id = data.get('alert_id')
+        user_message = data.get('message')
+        chat_history = data.get('history', [])
+        
+        if not alert_id or not user_message:
+            return jsonify({'success': False, 'error': 'Missing alert_id or message'}), 400
+        
+        # Get alert details
+        alert = alert_manager.get_alert_details(alert_id)
+        if not alert:
+            return jsonify({'success': False, 'error': 'Alert not found'}), 404
+        
+        # Configure Gemini
+        genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # Build context from alert and chat history
+        context = build_chat_context(alert, chat_history, user_message)
+        
+        # Get response from Gemini
+        response = model.generate_content(
+            context,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=1000,
+                temperature=0.3,
+            )
+        )
+        
+        return jsonify({
+            'success': True,
+            'response': response.text.strip() if response.text else "I couldn't generate a response. Please try again."
+        })
+        
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def build_chat_context(alert, chat_history, current_question):
+    """Build the context for the chat conversation"""
+    
+    # Base alert information
+    alert_context = f"""
+ALERT INFORMATION:
+- ID: {alert['id']}
+- Signature: {alert['alert_signature']}
+- Category: {alert['alert_category']}
+- Severity: {alert['severity']}
+- Timestamp: {alert['timestamp']}
+- Source: {alert['src_ip']}:{alert['src_port']}
+- Destination: {alert['dest_ip']}:{alert['dest_port']}
+- Protocol: {alert['protocol']}
+- Original Explanation: {alert.get('explanation', 'No explanation available')}
+"""
+    
+    # Build conversation history
+    conversation_history = ""
+    for msg in chat_history[-6:]:  # Last 6 messages for context
+        role = "USER" if msg['role'] == 'user' else "ASSISTANT"
+        conversation_history += f"{role}: {msg['content']}\n"
+    
+    prompt = f"""
+You are a helpful cybersecurity assistant explaining security alerts to non-technical home users.
+
+CONTEXT:
+{alert_context}
+
+CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT QUESTION:
+USER: {current_question}
+
+INSTRUCTIONS:
+1. Answer the user's question specifically about this security alert
+2. Use simple, non-technical language that a home user would understand
+3. Be helpful, calm, and reassuring - don't cause unnecessary panic
+4. If the user asks about technical details, explain them in simple terms
+5. Focus on practical advice and next steps
+6. Keep your response concise but thorough
+7. If you're not sure about something, say so and suggest where they can find more information
+
+Please provide a helpful response to the user's question:
+"""
+    
+    return prompt
+
+@app.route('/api/chat/suggested_questions')
+def api_suggested_questions():
+    """Get suggested questions for an alert"""
+    alert_id = request.args.get('alert_id', type=int)
+    
+    if not alert_id:
+        return jsonify({'success': False, 'error': 'Missing alert_id'}), 400
+    
+    alert = alert_manager.get_alert_details(alert_id)
+    if not alert:
+        return jsonify({'success': False, 'error': 'Alert not found'}), 404
+    
+    # Generate context-aware suggested questions
+    questions = [
+        "What does this alert mean in simple terms?",
+        "How serious is this?",
+        "What should I do right now?",
+        "Could this be a false alarm?",
+        "How can I prevent this in the future?",
+        "Does this affect my specific devices?",
+        "Should I be worried about my personal data?"
+    ]
+    
+    # Add severity-specific questions
+    if alert['severity'] == 1:
+        questions.insert(0, "Is this an emergency?")
+        questions.insert(1, "What's the immediate danger?")
+    
+    return jsonify({'success': True, 'questions': questions})
+
 
 def create_templates():
     """Create HTML templates if they don't exist"""
