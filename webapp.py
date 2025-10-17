@@ -12,13 +12,19 @@ import argparse
 import subprocess
 import sys
 import psutil
+import logging
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class AlertManager:
     """Manages alert data from SQLite database"""
@@ -319,7 +325,6 @@ def api_db_stats():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-
 @app.route('/api/db/cleanup')
 def api_db_cleanup():
     """Clean up old alerts"""
@@ -339,7 +344,6 @@ def api_db_cleanup():
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    
 
 @app.route('/api/db/export')
 def api_db_export():
@@ -359,7 +363,6 @@ def api_db_export():
             return jsonify({'success': True, 'data': export_data})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-
 
 @app.route('/api/db/clear_all')
 def api_db_clear_all():
@@ -454,17 +457,17 @@ def build_chat_context(alert, chat_history, current_question):
     
     # Base alert information
     alert_context = f"""
-                        ALERT INFORMATION:
-                        - ID: {alert['id']}
-                        - Signature: {alert['alert_signature']}
-                        - Category: {alert['alert_category']}
-                        - Severity: {alert['severity']}
-                        - Timestamp: {alert['timestamp']}
-                        - Source: {alert['src_ip']}:{alert['src_port']}
-                        - Destination: {alert['dest_ip']}:{alert['dest_port']}
-                        - Protocol: {alert['protocol']}
-                        - Original Explanation: {alert.get('explanation', 'No explanation available')}
-                        """
+ALERT INFORMATION:
+- ID: {alert['id']}
+- Signature: {alert['alert_signature']}
+- Category: {alert['alert_category']}
+- Severity: {alert['severity']}
+- Timestamp: {alert['timestamp']}
+- Source: {alert['src_ip']}:{alert['src_port']}
+- Destination: {alert['dest_ip']}:{alert['dest_port']}
+- Protocol: {alert['protocol']}
+- Original Explanation: {alert.get('explanation', 'No explanation available')}
+"""
     
     # Build conversation history
     conversation_history = ""
@@ -526,12 +529,104 @@ def api_suggested_questions():
         questions.insert(0, "Is this an emergency?")
         questions.insert(1, "What's the immediate danger?")
     
+    # Add signature-specific questions
+    signature_lower = alert['alert_signature'].lower()
+    if 'botnet' in signature_lower:
+        questions.extend([
+            "What is a botnet and why is it dangerous?",
+            "How do I know if my device is part of a botnet?"
+        ])
+    elif 'ssh' in signature_lower or 'login' in signature_lower:
+        questions.extend([
+            "Should I change my passwords?",
+            "How to secure my remote access?"
+        ])
+    elif 'malware' in signature_lower:
+        questions.extend([
+            "How to scan for malware?",
+            "What antivirus should I use?"
+        ])
+    
     return jsonify({'success': True, 'questions': questions})
 
+@app.route('/api/chat/regenerate_explanation', methods=['POST'])
+def api_regenerate_explanation():
+    """Regenerate AI explanation for an alert"""
+    try:
+        data = request.get_json()
+        alert_id = data.get('alert_id')
+        
+        if not alert_id:
+            return jsonify({'success': False, 'error': 'Missing alert_id'}), 400
+        
+        # Get alert details
+        alert = alert_manager.get_alert_details(alert_id)
+        if not alert:
+            return jsonify({'success': False, 'error': 'Alert not found'}), 404
+        
+        # Configure Gemini
+        genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        # Create enhanced prompt for regeneration
+        prompt = f"""
+You are a cybersecurity expert explaining a network security alert to a non-technical home user.
 
-def save_chat_message(self, alert_id: int, role: str, content: str):
+ALERT DETAILS:
+- Signature: {alert['alert_signature']}
+- Category: {alert['alert_category']}
+- Severity: {alert['severity']}
+- Source: {alert['src_ip']}:{alert['src_port']}
+- Destination: {alert['dest_ip']}:{alert['dest_port']}
+- Protocol: {alert['protocol']}
+- Timestamp: {alert['timestamp']}
+
+Please provide a fresh, clear explanation with this structure:
+
+🚨 **What Happened**: Briefly explain what was detected
+
+⚠️ **Why It Matters**: Explain the potential impact
+
+🔧 **What To Do**: Provide 3-5 specific, actionable steps
+
+🎯 **Key Takeaway**: One sentence summary
+
+Use simple, everyday language. Avoid technical jargon. Be reassuring but honest about risks.
+"""
+        
+        # Get new explanation from Gemini
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                max_output_tokens=800,
+                temperature=0.4,  # Slightly higher temperature for variety
+            )
+        )
+        
+        new_explanation = response.text.strip() if response.text else None
+        
+        if new_explanation:
+            # Update the alert in database
+            with sqlite3.connect(alert_manager.db_path) as conn:
+                conn.execute(
+                    "UPDATE alerts SET explanation = ? WHERE id = ?",
+                    (new_explanation, alert_id)
+                )
+            
+            return jsonify({
+                'success': True,
+                'new_explanation': new_explanation
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to generate new explanation'}), 500
+        
+    except Exception as e:
+        logger.error(f"Explanation regeneration error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def save_chat_message(alert_id: int, role: str, content: str):
     """Save chat message to database"""
-    with sqlite3.connect(self.db_path) as conn:
+    with sqlite3.connect(alert_manager.db_path) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -548,9 +643,9 @@ def save_chat_message(self, alert_id: int, role: str, content: str):
             (alert_id, role, content)
         )
 
-def get_chat_history(self, alert_id: int, limit: int = 20):
+def get_chat_history(alert_id: int, limit: int = 20):
     """Get chat history for an alert"""
-    with sqlite3.connect(self.db_path) as conn:
+    with sqlite3.connect(alert_manager.db_path) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.execute(
             "SELECT role, content, timestamp FROM chat_messages WHERE alert_id = ? ORDER BY timestamp ASC LIMIT ?",
@@ -563,10 +658,8 @@ def create_templates():
     templates_dir = "templates"
     if not os.path.exists(templates_dir):
         os.makedirs(templates_dir)
-
-
     
-    # Base template
+    # Base template (simplified - you already have the full version)
     base_template = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -605,384 +698,12 @@ def create_templates():
 </body>
 </html>'''
     
-    # Dashboard template
-    dashboard_template = '''{% extends "base.html" %}
-
-{% block content %}
-<div class="row mb-4">
-    <div class="col">
-        <h1>Security Alert Dashboard</h1>
-        <p class="text-muted">AI-powered explanations of network security alerts</p>
-    </div>
-</div>
-
-<!-- Service Status -->
-<div class="row mb-4">
-    <div class="col">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-activity"></i> Service Status</h5>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="d-flex align-items-center">
-                            <span class="badge bg-{% if status.suricata %}success{% else %}danger{% endif %} me-2">
-                                {% if status.suricata %}Running{% else %}Stopped{% endif %}
-                            </span>
-                            <strong>Suricata IDS</strong>
-                        </div>
-                        <div class="mt-2">
-                            {% if status.suricata %}
-                            <button class="btn btn-warning btn-sm" onclick="stopSuricata()">
-                                <i class="bi bi-stop-circle"></i> Stop
-                            </button>
-                            {% else %}
-                            <button class="btn btn-success btn-sm" onclick="startSuricata()">
-                                <i class="bi bi-play-circle"></i> Start
-                            </button>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="d-flex align-items-center">
-                            <span class="badge bg-{% if status.watcher %}success{% else %}danger{% endif %} me-2">
-                                {% if status.watcher %}Running{% else %}Stopped{% endif %}
-                            </span>
-                            <strong>ChatIDS Watcher</strong>
-                        </div>
-                        <div class="mt-2">
-                            {% if status.watcher %}
-                            <button class="btn btn-warning btn-sm" onclick="stopWatcher()">
-                                <i class="bi bi-stop-circle"></i> Stop
-                            </button>
-                            {% else %}
-                            <button class="btn btn-success btn-sm" onclick="startWatcher()">
-                                <i class="bi bi-play-circle"></i> Start
-                            </button>
-                            {% endif %}
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="d-flex align-items-center">
-                            <span class="badge bg-success me-2">Running</span>
-                            <strong>Web Dashboard</strong>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Statistics Cards -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card bg-primary text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4>{{ stats.total_alerts }}</h4>
-                        <p>Total Alerts</p>
-                    </div>
-                    <i class="bi bi-exclamation-triangle fa-2x"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card bg-warning text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4>{{ stats.alerts_24h }}</h4>
-                        <p>Last 24 Hours</p>
-                    </div>
-                    <i class="bi bi-clock fa-2x"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card bg-info text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4>{{ stats.severity_breakdown.get(1, 0) }}</h4>
-                        <p>High Severity</p>
-                    </div>
-                    <i class="bi bi-exclamation-circle fa-2x"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card bg-success text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4>{{ stats.severity_breakdown.get(3, 0) }}</h4>
-                        <p>Low Severity</p>
-                    </div>
-                    <i class="bi bi-info-circle fa-2x"></i>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Filters -->
-<div class="row mb-3">
-    <div class="col">
-        <form method="GET" class="d-flex gap-3 align-items-end">
-            <div>
-                <label class="form-label">Severity Filter</label>
-                <select name="severity" class="form-select">
-                    <option value="">All Severities</option>
-                    <option value="1" {% if current_severity == 1 %}selected{% endif %}>High (1)</option>
-                    <option value="2" {% if current_severity == 2 %}selected{% endif %}>Medium (2)</option>
-                    <option value="3" {% if current_severity == 3 %}selected{% endif %}>Low (3)</option>
-                </select>
-            </div>
-            <div>
-                <label class="form-label">Time Filter</label>
-                <select name="hours" class="form-select">
-                    <option value="">All Time</option>
-                    <option value="1" {% if current_hours == 1 %}selected{% endif %}>Last Hour</option>
-                    <option value="6" {% if current_hours == 6 %}selected{% endif %}>Last 6 Hours</option>
-                    <option value="24" {% if current_hours == 24 %}selected{% endif %}>Last 24 Hours</option>
-                    <option value="168" {% if current_hours == 168 %}selected{% endif %}>Last Week</option>
-                </select>
-            </div>
-            <div>
-                <button type="submit" class="btn btn-primary">Filter</button>
-                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Clear</a>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Alerts List -->
-<div class="row">
-    <div class="col">
-        <h3>Recent Alerts</h3>
-        {% if alerts %}
-            <div class="row">
-                {% for alert in alerts %}
-                <div class="col-12 mb-3">
-                    <div class="card alert-card severity-{{ alert.severity }}">
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <h5 class="card-title">
-                                        <i class="bi bi-exclamation-triangle text-warning"></i>
-                                        {{ alert.alert_signature }}
-                                    </h5>
-                                    <p class="text-muted mb-2">
-                                        <small>
-                                            <i class="bi bi-clock"></i> {{ alert.timestamp }}
-                                            <span class="ms-3">
-                                                <i class="bi bi-hdd-network"></i> 
-                                                {{ alert.src_ip }}:{{ alert.src_port }} → {{ alert.dest_ip }}:{{ alert.dest_port }}
-                                            </span>
-                                            <span class="ms-3">
-                                                <i class="bi bi-tag"></i> {{ alert.alert_category }}
-                                            </span>
-                                        </small>
-                                    </p>
-                                    {% if alert.explanation %}
-                                    <div class="explanation-box">
-                                        <strong>AI Explanation:</strong>
-                                        <div class="mt-2">{{ alert.explanation[:200] }}{% if alert.explanation|length > 200 %}...{% endif %}</div>
-                                    </div>
-                                    {% else %}
-                                    <div class="text-muted">
-                                        <em>No explanation available</em>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                                <div class="col-md-4 text-end">
-                                    <span class="badge bg-{% if alert.severity == 1 %}danger{% elif alert.severity == 2 %}warning{% else %}secondary{% endif %} mb-2">
-                                        Severity {{ alert.severity }}
-                                    </span><br>
-                                    <a href="{{ url_for('alert_detail', alert_id=alert.id) }}" class="btn btn-outline-primary btn-sm">
-                                        <i class="bi bi-eye"></i> View Details
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        {% else %}
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle"></i>
-                No alerts found matching your criteria.
-            </div>
-        {% endif %}
-    </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function startSuricata() {
-    fetch('/api/start_suricata')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert('Failed to start Suricata: ' + data.message);
-            }
-        });
-}
-
-function stopSuricata() {
-    fetch('/api/stop_suricata')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert('Failed to stop Suricata: ' + data.message);
-            }
-        });
-}
-
-function startWatcher() {
-    fetch('/api/start_watcher')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert('Failed to start watcher: ' + data.message);
-            }
-        });
-}
-
-function stopWatcher() {
-    fetch('/api/stop_watcher')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                location.reload();
-            } else {
-                alert('Failed to stop watcher: ' + data.message);
-            }
-        });
-}
-</script>
-{% endblock %}'''
-    
-    # Alert detail template
-    detail_template = '''{% extends "base.html" %}
-
-{% block title %}Alert Details - ChatIDS{% endblock %}
-
-{% block content %}
-<div class="row mb-3">
-    <div class="col">
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
-                <li class="breadcrumb-item active">Alert #{{ alert.id }}</li>
-            </ol>
-        </nav>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col">
-        <div class="card severity-{{ alert.severity }}">
-            <div class="card-header">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h3 class="mb-0">
-                        <i class="bi bi-exclamation-triangle text-warning"></i>
-                        {{ alert.alert_signature }}
-                    </h3>
-                    <span class="badge bg-{% if alert.severity == 1 %}danger{% elif alert.severity == 2 %}warning{% else %}secondary{% endif %}">
-                        Severity {{ alert.severity }}
-                    </span>
-                </div>
-            </div>
-            <div class="card-body">
-                <!-- Basic Info -->
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <h5>Alert Information</h5>
-                        <table class="table table-sm">
-                            <tr><td><strong>Timestamp:</strong></td><td>{{ alert.timestamp }}</td></tr>
-                            <tr><td><strong>Category:</strong></td><td>{{ alert.alert_category }}</td></tr>
-                            <tr><td><strong>Protocol:</strong></td><td>{{ alert.protocol }}</td></tr>
-                            <tr><td><strong>Source:</strong></td><td>{{ alert.src_ip }}:{{ alert.src_port }}</td></tr>
-                            <tr><td><strong>Destination:</strong></td><td>{{ alert.dest_ip }}:{{ alert.dest_port }}</td></tr>
-                        </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h5>Status</h5>
-                        <div class="alert alert-info">
-                            <i class="bi bi-robot"></i>
-                            {% if alert.explanation_cached %}
-                            This explanation was generated using AI and cached for efficiency.
-                            {% else %}
-                            This alert has not been processed through AI explanation yet.
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- AI Explanation -->
-                {% if alert.explanation %}
-                <div class="row mb-4">
-                    <div class="col">
-                        <h5>AI-Generated Explanation</h5>
-                        <div class="explanation-box">
-                            <pre style="white-space: pre-wrap; font-family: inherit;">{{ alert.explanation }}</pre>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-                
-                <!-- Raw Alert Data -->
-                {% if alert.raw_alert_parsed %}
-                <div class="row">
-                    <div class="col">
-                        <h5>Technical Details</h5>
-                        <div class="accordion" id="technicalDetails">
-                            <div class="accordion-item">
-                                <h2 class="accordion-header" id="rawDataHeader">
-                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#rawDataCollapse">
-                                        <i class="bi bi-code-slash me-2"></i> Raw Alert Data
-                                    </button>
-                                </h2>
-                                <div id="rawDataCollapse" class="accordion-collapse collapse" data-bs-parent="#technicalDetails">
-                                    <div class="accordion-body">
-                                        <pre><code>{{ alert.raw_alert_parsed | tojsonpretty }}</code></pre>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %}'''
-    
-    # Write templates to files
-    with open(f"{templates_dir}/base.html", "w") as f:
-        f.write(base_template)
-    
-    with open(f"{templates_dir}/dashboard.html", "w") as f:
-        f.write(dashboard_template)
-    
-    with open(f"{templates_dir}/alert_detail.html", "w") as f:
-        f.write(detail_template)
+    # Write base template only if it doesn't exist
+    base_template_path = os.path.join(templates_dir, "base.html")
+    if not os.path.exists(base_template_path):
+        with open(base_template_path, "w") as f:
+            f.write(base_template)
+        print(f"Created {base_template_path}")
 
 def tojsonpretty(value):
     """Custom Jinja2 filter for pretty JSON formatting"""
@@ -1014,7 +735,7 @@ def main():
     # Initialize alert manager
     alert_manager = AlertManager(args.db_path)
     
-    # Create templates
+    # Create templates if they don't exist
     create_templates()
     
     # Add custom filter

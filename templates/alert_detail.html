@@ -15,8 +15,8 @@
 </div>
 
 <div class="row">
-    <div class="col">
-        <div class="card severity-{{ alert.severity }}">
+    <div class="col-md-8">
+        <div class="card severity-{{ alert.severity }} mb-4">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
                     <h3 class="mb-0">
@@ -91,5 +91,492 @@
             </div>
         </div>
     </div>
+    
+    <!-- Enhanced Chat Bot Column -->
+    <div class="col-md-4">
+        <div class="card chat-card" style="height: 600px; display: flex; flex-direction: column;">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="mb-0">
+                        <i class="bi bi-robot"></i> Security Assistant
+                    </h5>
+                    <small>Ask questions about this alert</small>
+                </div>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="bi bi-gear"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#" onclick="clearChat()">Clear Chat</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="exportChat()">Export Conversation</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" onclick="testChatAPI()">Test Connection</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div class="card-body p-0" style="flex: 1; overflow: hidden;">
+                <div id="chatMessages" class="p-3" style="height: 100%; overflow-y: auto; background-color: #f8f9fa;">
+                    <div class="text-center text-muted py-4" id="emptyChatState">
+                        <i class="bi bi-robot display-4"></i>
+                        <p class="mt-2">I'm your Security Assistant. Ask me anything about this alert!</p>
+                        <small class="text-muted">Alert ID: {{ alert.id }}</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="card-footer p-3">
+                <!-- Connection Status -->
+                <div id="connectionStatus" class="alert alert-warning d-none mb-2 py-1">
+                    <small><i class="bi bi-exclamation-triangle"></i> <span id="statusMessage">Checking connection...</span></small>
+                </div>
+
+                <!-- Quick Action Buttons -->
+                <div class="mb-3">
+                    <div class="btn-group w-100" role="group">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="quickQuestion('What does this alert mean?')">
+                            <i class="bi bi-translate"></i> Explain
+                        </button>
+                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="quickQuestion('What should I do about this?')">
+                            <i class="bi bi-shield-check"></i> Action
+                        </button>
+                        <button type="button" class="btn btn-outline-info btn-sm" onclick="quickQuestion('Is this urgent?')">
+                            <i class="bi bi-clock"></i> Urgency
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Suggested Questions -->
+                <div class="mb-3">
+                    <small class="text-muted d-block mb-2">Common questions:</small>
+                    <div id="suggestedQuestions" class="d-flex flex-wrap gap-1">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="quickQuestion('Explain this like I\'m 10 years old')">
+                            Simple Explanation
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="quickQuestion('What are the risks?')">
+                            Risks
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="quickQuestion('Could this be a false positive?')">
+                            False Positive?
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="quickQuestion('How to prevent this?')">
+                            Prevention
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Chat Input -->
+                <div class="input-group">
+                    <input type="text" id="chatInput" class="form-control" placeholder="Ask about this alert..." 
+                           onkeypress="handleChatKeypress(event)" autocomplete="off">
+                    <button class="btn btn-primary" onclick="sendChatMessage()" id="sendButton">
+                        <i class="bi bi-send"></i>
+                    </button>
+                </div>
+                
+                <!-- Character Counter -->
+                <div class="mt-1 text-end">
+                    <small class="text-muted">
+                        <span id="charCount">0</span>/500 characters
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<style>
+.typing-dots {
+    display: inline-flex;
+    margin-right: 8px;
+}
+.typing-dots span {
+    height: 6px;
+    width: 6px;
+    margin: 0 1px;
+    background-color: #6c757d;
+    border-radius: 50%;
+    display: block;
+    animation: typing 1s infinite ease-in-out;
+}
+.typing-dots span:nth-child(1) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(2) { animation-delay: 0.4s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.6s; }
+@keyframes typing {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+.chat-message {
+    max-width: 80%;
+    word-wrap: break-word;
+}
+</style>
+
+<script>
+// Debug information
+console.log('Chat Assistant Initializing...');
+console.log('Alert ID:', parseInt("{{ alert.id }}"));
+
+let currentAlertId = parseInt("{{ alert.id }}");
+let chatHistory = [];
+let isProcessing = false;
+
+// Load initial chat message and setup
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing chat...');
+    addWelcomeMessage();
+    setupChatInput();
+    testChatConnection();
+});
+
+function setupChatInput() {
+    const chatInput = document.getElementById('chatInput');
+    const charCount = document.getElementById('charCount');
+    
+    if (!chatInput) {
+        console.error('Chat input element not found!');
+        return;
+    }
+    
+    chatInput.addEventListener('input', function() {
+        const length = this.value.length;
+        charCount.textContent = length;
+        
+        if (length > 500) {
+            charCount.classList.add('text-danger');
+        } else {
+            charCount.classList.remove('text-danger');
+        }
+    });
+    
+    // Focus on input
+    chatInput.focus();
+}
+
+function testChatConnection() {
+    const statusDiv = document.getElementById('connectionStatus');
+    const statusMessage = document.getElementById('statusMessage');
+    
+    statusDiv.classList.remove('d-none');
+    statusMessage.textContent = 'Testing connection to chat API...';
+    
+    fetch('/api/chat/suggested_questions?alert_id=' + currentAlertId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                statusDiv.className = 'alert alert-success mb-2 py-1';
+                statusMessage.innerHTML = '<i class="bi bi-check-circle"></i> Connected successfully';
+                console.log('Chat API connection test: SUCCESS');
+                
+                // Hide success message after 3 seconds
+                setTimeout(() => {
+                    statusDiv.classList.add('d-none');
+                }, 3000);
+            } else {
+                throw new Error(data.error || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            statusDiv.className = 'alert alert-danger mb-2 py-1';
+            statusMessage.innerHTML = `<i class="bi bi-x-circle"></i> Connection failed: ${error.message}`;
+            console.error('Chat API connection test: FAILED', error);
+        });
+}
+
+function testChatAPI() {
+    testChatConnection();
+}
+
+function addWelcomeMessage() {
+    const emptyState = document.getElementById('emptyChatState');
+    if (emptyState) {
+        emptyState.style.display = 'none';
+    }
+    
+    addChatMessage('assistant', 
+        `Hello! I'm your Security Assistant for alert #${currentAlertId}. I can help you understand this security alert and answer any questions you have. \n\nWhat would you like to know about this alert?`
+    );
+}
+
+function addChatMessage(role, content, isError = false) {
+    const messagesDiv = document.getElementById('chatMessages');
+    if (!messagesDiv) {
+        console.error('Chat messages container not found!');
+        return;
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `mb-3 ${role === 'user' ? 'text-end' : ''}`;
+    
+    const bubbleClass = role === 'user' ? 'bg-primary text-white' : 
+                       isError ? 'bg-danger text-white' : 'bg-light';
+    const alignmentClass = role === 'user' ? 'ms-5' : 'me-5';
+    
+    // Format content with line breaks
+    const formattedContent = content.replace(/\n/g, '<br>');
+    
+    messageDiv.innerHTML = `
+        <div class="d-flex ${role === 'user' ? 'justify-content-end' : ''}">
+            ${role === 'assistant' ? '<i class="bi bi-robot me-2 text-muted"></i>' : ''}
+            <div class="rounded p-3 ${bubbleClass} ${alignmentClass} chat-message">
+                ${formattedContent}
+                ${role === 'assistant' && !isError ? `
+                    <div class="mt-2 text-${isError ? 'white-50' : 'muted'} small">
+                        <i class="bi bi-clock"></i> ${new Date().toLocaleTimeString()}
+                    </div>
+                ` : ''}
+            </div>
+            ${role === 'user' ? '<i class="bi bi-person ms-2 text-muted"></i>' : ''}
+        </div>
+    `;
+    
+    messagesDiv.appendChild(messageDiv);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    
+    // Add to history (excluding errors)
+    if (!isError) {
+        chatHistory.push({ role, content, timestamp: new Date().toISOString() });
+    }
+}
+
+function handleChatKeypress(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendChatMessage();
+    }
+}
+
+function sendChatMessage() {
+    if (isProcessing) {
+        console.log('Chat is already processing a message');
+        return;
+    }
+    
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    
+    if (!message) {
+        showToast('Please enter a message', 'warning');
+        return;
+    }
+    
+    if (message.length > 500) {
+        showToast('Message too long (max 500 characters)', 'warning');
+        return;
+    }
+    
+    console.log('Sending message:', message);
+    
+    // Add user message
+    addChatMessage('user', message);
+    input.value = '';
+    document.getElementById('charCount').textContent = '0';
+    
+    // Show typing indicator
+    showTypingIndicator();
+    
+    // Disable input while processing
+    setChatInputState(false);
+    
+    // Send to backend
+    fetch('/api/chat/ask', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            alert_id: currentAlertId,
+            message: message,
+            history: chatHistory.slice(-6) // Last 6 messages for context
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Received response:', data);
+        removeTypingIndicator();
+        
+        if (data.success) {
+            addChatMessage('assistant', data.response);
+        } else {
+            addChatMessage('assistant', 
+                'Sorry, I encountered an error while processing your question. Please try again.', 
+                true
+            );
+            console.error('Chat API error:', data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Chat fetch error:', error);
+        removeTypingIndicator();
+        addChatMessage('assistant', 
+            `Sorry, I'm having trouble connecting to the server. Error: ${error.message}`, 
+            true
+        );
+    })
+    .finally(() => {
+        setChatInputState(true);
+    });
+}
+
+function showTypingIndicator() {
+    const messagesDiv = document.getElementById('chatMessages');
+    const typingDiv = document.createElement('div');
+    typingDiv.id = 'typingIndicator';
+    typingDiv.className = 'mb-3';
+    typingDiv.innerHTML = `
+        <div class="d-flex">
+            <i class="bi bi-robot me-2 text-muted"></i>
+            <div class="rounded p-3 bg-light me-5 chat-message">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                Thinking...
+            </div>
+        </div>
+    `;
+    messagesDiv.appendChild(typingDiv);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    isProcessing = true;
+}
+
+function removeTypingIndicator() {
+    const indicator = document.getElementById('typingIndicator');
+    if (indicator) {
+        indicator.remove();
+    }
+    isProcessing = false;
+}
+
+function setChatInputState(enabled) {
+    const input = document.getElementById('chatInput');
+    const button = document.getElementById('sendButton');
+    
+    if (input && button) {
+        input.disabled = !enabled;
+        button.disabled = !enabled;
+        
+        if (enabled) {
+            button.innerHTML = '<i class="bi bi-send"></i>';
+            input.placeholder = "Ask about this alert...";
+            input.focus();
+        } else {
+            button.innerHTML = '<i class="bi bi-hourglass"></i>';
+            input.placeholder = "Processing...";
+        }
+    }
+}
+
+function quickQuestion(question) {
+    const input = document.getElementById('chatInput');
+    if (input) {
+        input.value = question;
+        sendChatMessage();
+    }
+}
+
+function clearChat() {
+    const messagesDiv = document.getElementById('chatMessages');
+    const emptyState = document.getElementById('emptyChatState');
+    
+    if (messagesDiv) {
+        // Clear all messages
+        messagesDiv.innerHTML = '';
+        if (emptyState) {
+            messagesDiv.appendChild(emptyState);
+            emptyState.style.display = 'block';
+        }
+        
+        // Clear history
+        chatHistory = [];
+        
+        showToast('Chat cleared', 'success');
+    }
+}
+
+function exportChat() {
+    if (chatHistory.length === 0) {
+        showToast('No conversation to export', 'warning');
+        return;
+    }
+    
+    const chatData = {
+        alert_id: currentAlertId,
+        export_time: new Date().toISOString(),
+        conversation: chatHistory
+    };
+    
+    const blob = new Blob([JSON.stringify(chatData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chatids-conversation-alert-${currentAlertId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Conversation exported', 'success');
+}
+
+function showToast(message, type = 'info') {
+    // Simple toast notification
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+    toast.style.cssText = 'top: 20px; right: 20px; z-index: 1050; min-width: 250px;';
+    toast.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(toast);
+    
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 3000);
+}
+
+// Load suggested questions from API
+function loadSuggestedQuestions() {
+    fetch(`/api/chat/suggested_questions?alert_id=${currentAlertId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.questions) {
+                updateSuggestedQuestions(data.questions);
+            }
+        })
+        .catch(error => console.error('Failed to load suggested questions:', error));
+}
+
+function updateSuggestedQuestions(questions) {
+    const container = document.getElementById('suggestedQuestions');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    questions.slice(0, 4).forEach(question => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-primary btn-sm';
+        button.textContent = question;
+        button.onclick = () => quickQuestion(question);
+        container.appendChild(button);
+    });
+}
+
+// Load suggested questions when page loads
+document.addEventListener('DOMContentLoaded', loadSuggestedQuestions);
+</script>
 {% endblock %}
