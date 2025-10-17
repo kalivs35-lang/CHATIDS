@@ -454,17 +454,17 @@ def build_chat_context(alert, chat_history, current_question):
     
     # Base alert information
     alert_context = f"""
-ALERT INFORMATION:
-- ID: {alert['id']}
-- Signature: {alert['alert_signature']}
-- Category: {alert['alert_category']}
-- Severity: {alert['severity']}
-- Timestamp: {alert['timestamp']}
-- Source: {alert['src_ip']}:{alert['src_port']}
-- Destination: {alert['dest_ip']}:{alert['dest_port']}
-- Protocol: {alert['protocol']}
-- Original Explanation: {alert.get('explanation', 'No explanation available')}
-"""
+                        ALERT INFORMATION:
+                        - ID: {alert['id']}
+                        - Signature: {alert['alert_signature']}
+                        - Category: {alert['alert_category']}
+                        - Severity: {alert['severity']}
+                        - Timestamp: {alert['timestamp']}
+                        - Source: {alert['src_ip']}:{alert['src_port']}
+                        - Destination: {alert['dest_ip']}:{alert['dest_port']}
+                        - Protocol: {alert['protocol']}
+                        - Original Explanation: {alert.get('explanation', 'No explanation available')}
+                        """
     
     # Build conversation history
     conversation_history = ""
@@ -528,6 +528,35 @@ def api_suggested_questions():
     
     return jsonify({'success': True, 'questions': questions})
 
+
+def save_chat_message(self, alert_id: int, role: str, content: str):
+    """Save chat message to database"""
+    with sqlite3.connect(self.db_path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id INTEGER,
+                role TEXT,
+                content TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (alert_id) REFERENCES alerts (id)
+            )
+        """)
+        
+        conn.execute(
+            "INSERT INTO chat_messages (alert_id, role, content) VALUES (?, ?, ?)",
+            (alert_id, role, content)
+        )
+
+def get_chat_history(self, alert_id: int, limit: int = 20):
+    """Get chat history for an alert"""
+    with sqlite3.connect(self.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT role, content, timestamp FROM chat_messages WHERE alert_id = ? ORDER BY timestamp ASC LIMIT ?",
+            (alert_id, limit)
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 def create_templates():
     """Create HTML templates if they don't exist"""
