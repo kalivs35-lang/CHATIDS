@@ -47,4 +47,5 @@ Thumbs.db
 build/
 dist/
 
-alert.db
+
+alerts.db
