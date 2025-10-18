@@ -22,7 +22,12 @@ def run_watcher(args):
     # Use environment variable if no key provided
     gemini_key = args.gemini_key or os.getenv('GEMINI_API_KEY')
     if gemini_key:
-        cmd.extend(['--gemini-key', gemini_key])
+        # Pass key via environment variable instead of command line
+        env = os.environ.copy()
+        env['GEMINI_API_KEY'] = gemini_key
+        # Don't pass --gemini-key argument to avoid logging
+    else:
+        env = os.environ.copy()
     
     if args.log_file:
         cmd.extend(['--log-file', args.log_file])
@@ -31,9 +36,9 @@ def run_watcher(args):
     if args.test_mode:
         cmd.append('--test-mode')
     
-    print(f"Starting watcher: {' '.join(cmd)}")
+    print(f"Starting watcher: {' '.join(cmd[:2])} [API_KEY_HIDDEN] {' '.join(cmd[2:]) if len(cmd) > 2 else ''}")
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=env)
     except KeyboardInterrupt:
         print("Watcher stopped by user")
     except subprocess.CalledProcessError as e:
@@ -90,10 +95,9 @@ def main():
     args = parser.parse_args()
     
     # Check if API key is available
-    if not args.gemini_key and 'both' in args.mode or 'watcher' in args.mode:
+    if not args.gemini_key and ('both' in args.mode or 'watcher' in args.mode):
         print("Error: Gemini API key is required. Set GEMINI_API_KEY environment variable or use --gemini-key")
         sys.exit(1)
-    
     
     # Check if required files exist
     if not os.path.exists('watcher.py'):
@@ -108,7 +112,7 @@ def main():
     print("================")
     print(f"Mode: {args.mode}")
     print(f"Database: {args.db_path}")
-    print(f"Gemini Key: {'***' + args.gemini_key[-4:] if len(args.gemini_key) > 4 else 'SET'}")
+    print(f"Gemini Key: {'***SET***' if args.gemini_key else 'NOT SET'}")
     
     if args.test_mode:
         print("Running in TEST MODE with sample data")
