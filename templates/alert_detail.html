@@ -15,8 +15,9 @@
 </div>
 
 <div class="row">
-    <div class="col-md-8">
-        <div class="card severity-{{ alert.severity }} mb-4">
+    <!-- Alert Details Column - Equal Width -->
+    <div class="col-lg-6 col-md-6">
+        <div class="card severity-{{ alert.severity }} mb-4 h-100">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
                     <h3 class="mb-0">
@@ -31,7 +32,7 @@
             <div class="card-body">
                 <!-- Basic Info -->
                 <div class="row mb-4">
-                    <div class="col-md-6">
+                    <div class="col-12">
                         <h5>Alert Information</h5>
                         <table class="table table-sm">
                             <tr><td><strong>Timestamp:</strong></td><td>{{ alert.timestamp }}</td></tr>
@@ -40,17 +41,6 @@
                             <tr><td><strong>Source:</strong></td><td>{{ alert.src_ip }}:{{ alert.src_port }}</td></tr>
                             <tr><td><strong>Destination:</strong></td><td>{{ alert.dest_ip }}:{{ alert.dest_port }}</td></tr>
                         </table>
-                    </div>
-                    <div class="col-md-6">
-                        <h5>Status</h5>
-                        <div class="alert alert-info">
-                            <i class="bi bi-robot"></i>
-                            {% if alert.explanation_cached %}
-                            This explanation was generated using AI and cached for efficiency.
-                            {% else %}
-                            This alert has not been processed through AI explanation yet.
-                            {% endif %}
-                        </div>
                     </div>
                 </div>
                 
@@ -65,6 +55,21 @@
                     </div>
                 </div>
                 {% endif %}
+                
+                <!-- Status -->
+                <div class="row mb-4">
+                    <div class="col">
+                        <h5>Status</h5>
+                        <div class="alert alert-info">
+                            <i class="bi bi-robot"></i>
+                            {% if alert.explanation_cached %}
+                            This explanation was generated using AI and cached for efficiency.
+                            {% else %}
+                            This alert has not been processed through AI explanation yet.
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
                 
                 <!-- Raw Alert Data -->
                 {% if alert.raw_alert_parsed %}
@@ -92,9 +97,9 @@
         </div>
     </div>
     
-    <!-- Enhanced Chat Bot Column -->
-    <div class="col-md-4">
-        <div class="card chat-card" style="height: 600px; display: flex; flex-direction: column;">
+    <!-- Security Assistant Column - Equal Width -->
+    <div class="col-lg-6 col-md-6">
+        <div class="card chat-card h-100" style="display: flex; flex-direction: column;">
             <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                 <div>
                     <h5 class="mb-0">
@@ -120,7 +125,7 @@
                 <div id="chatMessages" class="p-3" style="height: 100%; overflow-y: auto; background-color: #f8f9fa;">
                     <div class="text-center text-muted py-4" id="emptyChatState">
                         <i class="bi bi-robot display-4"></i>
-                        <p class="mt-2">I'm your Security Assistant. Ask me anything about this alert!</p>
+                        <p class="mt-3">I'm your Security Assistant. Ask me anything about this alert!</p>
                         <small class="text-muted">Alert ID: {{ alert.id }}</small>
                     </div>
                 </div>
@@ -212,8 +217,23 @@
     50% { transform: translateY(-5px); }
 }
 .chat-message {
-    max-width: 80%;
+    max-width: 85%;
     word-wrap: break-word;
+}
+/* Ensure both cards have equal height */
+.card {
+    width:  100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+.card-body {
+    flex: 1;
+    overflow-y: auto;
+}
+/* Additional styling for better appearance */
+.chat-card .card-body {
+    min-height: 400px;
 }
 </style>
 
