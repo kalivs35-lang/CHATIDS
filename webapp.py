@@ -32,6 +32,21 @@ class AlertManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
     
+    def is_valid(self) -> bool:
+        """Validate the SQLite database integrity."""
+        if not os.path.exists(self.db_path):
+            return False
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                integrity = conn.execute("PRAGMA integrity_check").fetchone()
+                return integrity is not None and integrity[0] == 'ok'
+        except sqlite3.DatabaseError as exc:
+            logger.error(f"Database integrity check failed: {exc}")
+            return False
+        except Exception as exc:
+            logger.error(f"Unexpected error validating database: {exc}")
+            return False
+    
     def get_alerts(self, limit: int = 50, severity: int = None, hours: int = None):
         """Get alerts from database with optional filtering"""
         with sqlite3.connect(self.db_path) as conn:
@@ -734,6 +749,9 @@ def main():
     
     # Initialize alert manager
     alert_manager = AlertManager(args.db_path)
+    if args.db_path and not alert_manager.is_valid():
+        logger.warning(f"Database file '{args.db_path}' is missing or corrupted. The dashboard will start, but data access will be disabled until the watcher recreates the database.")
+        alert_manager = None
     
     # Create templates if they don't exist
     create_templates()

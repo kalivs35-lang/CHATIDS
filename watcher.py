@@ -125,8 +125,21 @@ class AlertDatabase:
         self.init_database()
     
     def init_database(self):
-        """Initialize database schema"""
+        """Initialize database schema and recover corrupted database if needed"""
+        try:
+            self._ensure_database()
+        except sqlite3.DatabaseError as exc:
+            logger.error(f"Database is malformed or corrupted: {exc}")
+            self._recover_corrupted_database()
+            self._ensure_database()
+
+    def _ensure_database(self):
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()
+            if integrity is not None and integrity[0] != 'ok':
+                raise sqlite3.DatabaseError('SQLite integrity check failed')
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,6 +163,18 @@ class AlertDatabase:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_signature ON alerts(alert_signature)
             """)
+
+    def _recover_corrupted_database(self):
+        if os.path.exists(self.db_path):
+            backup_path = f"{self.db_path}.corrupt.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            try:
+                os.replace(self.db_path, backup_path)
+                logger.warning(f"Moved corrupted database to {backup_path}")
+            except OSError as exc:
+                logger.error(f"Failed to back up corrupted database: {exc}")
+                raise
+        else:
+            logger.warning("No existing database file found to back up.")
     
     def store_alert(self, alert_data: Dict[str, Any], explanation: str = None):
         """Store alert and explanation in database"""
